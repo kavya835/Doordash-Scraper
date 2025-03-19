@@ -1,4 +1,5 @@
 import asyncio
+import json, html
 
 
 from scrapybara import Scrapybara
@@ -20,65 +21,63 @@ async def retrieve_menu_items(instance, start_url: str) -> list[dict]:
 
         # print("Connecting to browser...")
         browser = await p.chromium.connect_over_cdp(cdp_url, timeout=120000)
-        context = await browser.new_context(viewport={'width': 1920, 'height': 1080}) # prevent timeout error
+        context = await browser.new_context()
         page = await context.new_page()
         
 
         # print(f"Navigating to {start_url}")
         await page.goto(start_url)
-        
 
-        # print("Waiting for menu items to load...")
-        await page.wait_for_selector('[data-testid="MenuItem"]')
         
+        restaurant_title = await page.text_content("h1")
+        print("Restaurant Title:", restaurant_title)
 
-        # # Scroll to load all items (works without it)
-        # print("Scrolling to load all items...")
-        # grid_container = await page.query_selector('[data-testid="VirtualGridContainer"]')
-        
-        # if grid_container:
-        #     prev_height = 0 # scroll height
-        #     while True:
-        #         await grid_container.evaluate('grid => grid.scrollTo(0, grid.scrollHeight)')
-        #         await page.wait_for_timeout(1000)  # wait for content to load
-        #         curr_height = await grid_container.evaluate('grid => grid.scrollHeight')
-                
-                
-        #         if curr_height == prev_height:
-        #             break
-        #         prev_height = curr_height
+        # Get list of Playwright locator objects that are of <script type="application/ld+json">
+        json_txt = await page.locator("script[type='application/ld+json']").all()
+        i = 1
 
-
-        # Get all menu items using html tags
-        items_elements = await page.query_selector_all('[data-testid="MenuItem"]')
-        
-        print(f"Found {len(items_elements)} items")
-        
         items = []
-        
-        for i, item in enumerate(items_elements):
 
-            # Extract item details
-            name_item = await item.query_selector('h3')
-            name = await name_item.text_content() if name_item else "N/A"
+        for js in json_txt:
+            raw_str = await js.text_content() # extract the inner text
+            data_obj = json.loads(raw_str)
             
-            price_item = await item.query_selector('[data-anchor-id="StoreMenuItemPrice"]')
-            price = await price_item.text_content() if price_item else "N/A"
-            
-            tag_item = await item.query_selector('[data-testid^="most_liked_"]')
-            tag = await tag_item.text_content() if tag_item else ""
-            
-            items.append({
-                'name': name,
-                'price': price,
-                'tag': tag
-            })
-            print(f"Added item {i+1}: {name} - {price} {tag}")
+
+            if "hasMenu" in data_obj:
+
+                # Save information as a json file
+                # with open(f"info.json", "w", encoding="utf-8") as f:
+                #     json.dump(data_obj, f, indent=2, ensure_ascii=False)
+
+
+                menu_obj = data_obj["hasMenu"]
+                sections_list = menu_obj["hasMenuSection"]
+
+                for section_group in sections_list:
+                    for section in section_group:
+                        items_list = section.get("hasMenuItem", [])
+                        for item in items_list:
+                            name = item.get("name", "Unknown Item")
+                            offers = item.get("offers", {})
+                            price = offers.get("price", "N/A")
+
+                            items.append({
+                                'name': name,
+                                'price': price
+                            })
 
 
         await context.close()
         await browser.close()
     
+    j = 1;
+    for i in items:
+        print(f"-----Item #{j}-----")
+        for key, value in i.items():
+            print(f"{key}: {value}")
+        j += 1
+        print();
+
     return items
 
 
